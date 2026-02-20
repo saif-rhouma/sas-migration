@@ -15,8 +15,11 @@ from metrics.metrics import (
     count_hardcoded_paths,
     analyze_data_dependencies
 )
-# import json
 from fastapi.middleware.cors import CORSMiddleware
+from dataclasses import asdict
+import json
+import re
+
 app = FastAPI()
 
 
@@ -33,6 +36,22 @@ app.add_middleware(
     allow_methods=["*"],         # GET, POST, PUT, DELETE…
     allow_headers=["*"],         # Accept all headers
 )
+
+
+def clean_python_code(refined: str) -> str:
+    """
+    Extract clean Python code from AI-refined string.
+    Removes code fences and leading descriptive lines.
+    """
+    # Try to extract code inside triple backticks
+    code_match = re.search(r"```(?:python)?\n(.*?)```", refined, re.DOTALL)
+    if code_match:
+        return code_match.group(1).strip()
+    # If no code fences, remove leading descriptive lines
+    lines = refined.splitlines()
+    if lines and re.match(r"^(Here's|This code|Here is)", lines[0], re.IGNORECASE):
+        lines = lines[1:]
+    return "\n".join(lines).strip()
 
 @app.post("/convert-file")
 async def convert_file(file: UploadFile = File(...)):
@@ -80,7 +99,12 @@ async def convert_file(file: UploadFile = File(...)):
     draft = compile_program(ir_nodes)
 
     # AI refinement
-    # refined = refine_code(sas_code, json.dumps([n.dict() for n in ir_nodes]), draft)
+    refined_raw = refine_code(
+        sas_code,
+        json.dumps([asdict(n) for n in program.steps]),
+        draft
+    )
+    refined = clean_python_code(refined_raw)
 
     # Confidence scoring
     score = compute_score(sas_code)
@@ -89,7 +113,7 @@ async def convert_file(file: UploadFile = File(...)):
         "filename": file.filename,
         "original_sas": sas_code,
         "draft_python": draft,
-        # "refined_python": refined,
+        "refined_python": refined,
         "confidence_score": score,
         "metrics": {
             "total_codes": total_codes,
