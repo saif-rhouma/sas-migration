@@ -16,8 +16,23 @@ from metrics.metrics import (
     analyze_data_dependencies
 )
 # import json
-
+from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI()
+
+
+# Allow React frontend origin
+origins = [
+    "http://localhost:8080",  # React dev server
+    "http://127.0.0.1:8080",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,       # Allowed origins
+    allow_credentials=True,
+    allow_methods=["*"],         # GET, POST, PUT, DELETE…
+    allow_headers=["*"],         # Accept all headers
+)
 
 @app.post("/convert-file")
 async def convert_file(file: UploadFile = File(...)):
@@ -72,6 +87,7 @@ async def convert_file(file: UploadFile = File(...)):
 
     return {
         "filename": file.filename,
+        "original_sas": sas_code,
         "draft_python": draft,
         # "refined_python": refined,
         "confidence_score": score,
