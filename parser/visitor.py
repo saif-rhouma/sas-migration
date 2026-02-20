@@ -26,14 +26,18 @@ class IRVisitor(SASVisitor):
     # -------------------------
 
     def visitData_stmt_block(self, ctx):
+        # DATA target
         target_token = ctx.Identifier() or ctx.ID_NULL()
-        target_name = target_token.getText()  # just the name
+        target_name = target_token.getText()
         data_step = DataStep(target=target_name)
 
-        # Track the DataStep object itself
-        self._current_datastep = data_step  
-
+        # Track LIBNAME statements inside the DATA step (or globally)
         for stmt_ctx in ctx.data_stmt_list():
+            if hasattr(stmt_ctx, 'LIBNAME'):
+                libname = stmt_ctx.LIBNAME().getText()
+                data_step.dependencies.append(libname)
+
+            # visit children normally
             result = self.visit(stmt_ctx)
             if result:
                 if isinstance(result, list):
@@ -41,14 +45,13 @@ class IRVisitor(SASVisitor):
                 else:
                     data_step.operations.append(result)
 
-        del self._current_datastep
         return data_step
 
 
     def visitSet_stmt(self, ctx):
-        datasets = [n.getText() for n in ctx.name()]  # ctx.name() is a list
+        datasets = [n.getText() for n in ctx.name()]
         token_index = ctx.start.tokenIndex
-        # If you expect only one dataset, you can use datasets[0]
+        # register XLSX or SQL sources if dataset name matches LIBNAME
         return Set(dataset=datasets, token_index=token_index)
 
     def visitMerge_stmt(self, ctx):

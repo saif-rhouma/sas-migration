@@ -1,6 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Optional, Union
-
+from typing import List, Union
 # Base expression for filters, assignments, etc.
 @dataclass
 class Expression:
@@ -75,8 +74,19 @@ class ProcMeans:
 class ProcFreq:
     dataset: str
 
+@dataclass
+class SQLCreateTable:
+    table: str
+    source_tables: List[str] = field(default_factory=list)
+
+@dataclass
+class ProcSQL:
+    statements: List[SQLCreateTable] = field(default_factory=list)
+
 # Full program
 @dataclass
 class Program:
-    steps: List[Union[DataStep, ProcMeans, ProcFreq]] = field(default_factory=list)
+    steps: List[Union[DataStep, ProcMeans, ProcFreq, ProcSQL]] = field(default_factory=list)
+
+
 

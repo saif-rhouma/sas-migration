@@ -1,5 +1,6 @@
 import re
 from collections import defaultdict
+from ir.models import DataStep, Set
 
 def count_total_codes(program):
     """
@@ -232,7 +233,7 @@ def extract_string_literals(sas_code):
 
 
 def analyze_data_dependencies(program, sas_code):
-    # Predefine all categories
+
     dependency_counts = {
         "sas7bdat": 0,
         "libname": 0,
@@ -243,67 +244,64 @@ def analyze_data_dependencies(program, sas_code):
         "hcp_per_table": 0
     }
 
-    # Helper to classify a table name or path
-    def classify_dependency(name: str):
-        name_upper = name.upper()
-        if ".SAS7BDAT" in name_upper:
-            return "sas7bdat"
-        elif ".CSV" in name_upper:
-            return "csv"
-        elif ".XLSX" in name_upper:
-            return "xlsx"
-        elif name_upper.startswith("LIBNAME"):
-            return "libname"
-        elif "SQL" in name_upper:
-            return "sql"
-        else:
-            return "other"
+    created_tables = set()
+    referenced_tables = set()
 
-    # -------- IR Dependencies --------
+    # -----------------------------------
+    # 1️⃣ DATA tables created
+    # -----------------------------------
     for step in program.steps:
+        if isinstance(step, DataStep):
+            if step.target and step.target.lower() != "_null_":
+                created_tables.add(step.target)
 
-        # Detect LIBNAME or DATA table dependencies
-        if hasattr(step, "name"):
-            dep_type = classify_dependency(step.name)
-            dependency_counts[dep_type] += 1
+            for op in getattr(step, "operations", []):
+                if isinstance(op, Set):
+                    for ds in op.dataset:
+                        referenced_tables.add(ds)
 
-        # Operations inside DATA step
-        if hasattr(step, "operations"):
-            for op in step.operations:
+    # -----------------------------------
+    # 1️⃣.1 Detect SQL CREATE TABLE (since IR doesn't support it)
+    # -----------------------------------
+    sql_created = re.findall(
+        r"CREATE\s+TABLE\s+([a-zA-Z0-9_]+\.[a-zA-Z0-9_]+)",
+        sas_code,
+        re.IGNORECASE
+    )
 
-                # LIBNAME detection inside expression
-                if hasattr(op, "expr") and "LIBNAME" in op.expr.expr.upper():
-                    dependency_counts["libname"] += 1
-                    if "XLSX" in op.expr.expr.upper():
-                        dependency_counts["xlsx"] += 1
+    for table in sql_created:
+        created_tables.add(table)
 
-                # CSV or HCP detection inside PUT / FILE statements
-                if hasattr(op, "expr") and (".CSV" in op.expr.expr.upper()):
-                    dependency_counts["csv"] += 1
+    # Count all created tables
+    dependency_counts["libname"] = len(created_tables)
 
-                # Tables referenced inside operations
-                if hasattr(op, "tables"):
-                    for t in op.tables:
-                        dep_type = classify_dependency(t)
-                        dependency_counts[dep_type] += 1
+    # -----------------------------------
+    # 2️⃣ Detect external file types from RAW CODE
+    # -----------------------------------
+    dependency_counts["xlsx"] = len(
+        re.findall(r"\.xlsx", sas_code, re.IGNORECASE)
+    )
 
-        # PROC SQL detection
-        if hasattr(step, "proc_name") and step.proc_name.upper() == "SQL":
-            dependency_counts["sql"] += 1
+    dependency_counts["csv"] = len(
+        re.findall(r"\.csv", sas_code, re.IGNORECASE)
+    )
 
-        # DATA= option in PROC
-        if hasattr(step, "data"):
-            dep_type = classify_dependency(step.data)
-            dependency_counts[dep_type] += 1
+    dependency_counts["sas7bdat"] = len(
+        re.findall(r"\.sas7bdat", sas_code, re.IGNORECASE)
+    )
 
-    # -------- Hardcoded Path Detection (HCP) --------
-    # Count all string literals that contain / or \ as HCP
+    # -----------------------------------
+    # 3️⃣ PROC SQL detection
+    # -----------------------------------
+    if re.search(r"\bPROC\s+SQL\b", sas_code, re.IGNORECASE):
+        dependency_counts["sql"] = 1
+
+    # -----------------------------------
+    # 4️⃣ Hardcoded paths
+    # -----------------------------------
     string_literals = re.findall(r'"([^"]+)"', sas_code)
-    hcp_count = sum(1 for s in string_literals if "/" in s or "\\" in s)
-    dependency_counts["hcp_per_table"] = hcp_count
-
-    # Ensure all categories are present even if 0
-    for k in ["sas7bdat", "libname", "csv", "xlsx", "sql", "other", "hcp_per_table"]:
-        dependency_counts.setdefault(k, 0)
+    dependency_counts["hcp_per_table"] = sum(
+        1 for s in string_literals if "/" in s or "\\" in s
+    )
 
     return dependency_counts
